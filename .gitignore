@@ -1,0 +1,4 @@
+certs
+*.plan
+*.tfstate*
+.terraform

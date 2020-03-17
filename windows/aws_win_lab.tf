@@ -6,6 +6,8 @@ variable "tf_public_key_path" {}
 variable "tf_private_key_path" {}
 variable "vpc_cidr" {}
 variable "my_ip" {}
+variable "instance_count" {}
+variable "subnet_count" {}
 variable "hostedzone" {}
 variable "aws_region" {
   default = "us-east-1"
@@ -58,19 +60,12 @@ resource "aws_internet_gateway" "igw" {
 
 }
 
-resource "aws_subnet" "public_subnet1" {
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 2)
+resource "aws_subnet" "public_subnet" {
+  count = var.subnet_count
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
   vpc_id                  = aws_vpc.vpc.id
   map_public_ip_on_launch = "true"
-  availability_zone       = data.aws_availability_zones.azs.names[0]
-
-}
-
-resource "aws_subnet" "public_subnet2" {
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 3)
-  vpc_id                  = aws_vpc.vpc.id
-  map_public_ip_on_launch = "true"
-  availability_zone       = data.aws_availability_zones.azs.names[1]
+  availability_zone       = data.aws_availability_zones.azs.names[count.index]
 
 }
 
@@ -84,13 +79,9 @@ resource "aws_route_table" "rtb" {
   }
 }
 
-resource "aws_route_table_association" "rta-public_subnet1" {
-  subnet_id      = aws_subnet.public_subnet1.id
-  route_table_id = aws_route_table.rtb.id
-}
-
-resource "aws_route_table_association" "rta-public_subnet2" {
-  subnet_id      = aws_subnet.public_subnet2.id
+resource "aws_route_table_association" "rta-public_subnet" {
+  count = var.subnet_count
+  subnet_id      = aws_subnet.public_subnet[count.index].id
   route_table_id = aws_route_table.rtb.id
 }
 
@@ -122,7 +113,7 @@ resource "aws_security_group" "public_sg" {
     from_port   = 0
     to_port     = 0
     protocol    = -1
-    cidr_blocks = ["196.231.1.244/32"]
+    cidr_blocks = ["${var.my_ip}/32"]
   }
   egress {
     from_port   = 0
@@ -137,52 +128,32 @@ resource "aws_key_pair" "tf_key_pair" {
   public_key = file(var.tf_public_key_path)
 }
 
-resource "aws_instance" "srv01" {
+resource "aws_instance" "srv" {
+  count = var.instance_count
   ami                    = data.aws_ami.win-server12.id
-  subnet_id              = aws_subnet.public_subnet1.id
+  subnet_id              = aws_subnet.public_subnet[count.index].id
   instance_type          = "t3.medium"
   key_name               = var.tf_key_name
   vpc_security_group_ids = [aws_security_group.public_sg.id, aws_security_group.private_sg.id]
 }
-resource "aws_route53_record" "dns_srv01" {
+resource "aws_route53_record" "dns_srv" {
+  count   = var.instance_count
   zone_id = data.aws_route53_zone.primary.zone_id
-  name    = "srv01"
+  name    = "srv${count.index}"
   type    = "A"
   ttl     = "30"
-  records = [aws_instance.srv01.public_ip]
+  records = [aws_instance.srv[count.index].public_ip]
+  allow_overwrite = true
   depends_on = [
-    aws_instance.srv01
-  ]
-}
-resource "aws_instance" "srv02" {
-  ami                    = data.aws_ami.win-server12.id
-  subnet_id              = aws_subnet.public_subnet1.id
-  instance_type          = "t3.medium"
-  key_name               = var.tf_key_name
-  vpc_security_group_ids = [aws_security_group.public_sg.id, aws_security_group.private_sg.id]
-}
-resource "aws_route53_record" "dns_srv02" {
-  zone_id = data.aws_route53_zone.primary.zone_id
-  name    = "srv02"
-  type    = "A"
-  ttl     = "30"
-  records = [aws_instance.srv02.public_ip]
-  depends_on = [
-    aws_instance.srv02
+    aws_instance.srv
   ]
 }
 
 /* --------------------------------- Output --------------------------------- */
 
-output "win_srv01_id" {
-  value = aws_instance.srv01.id
+output "aws_route53_record_public_dns0" {
+  value = aws_route53_record.dns_srv[0].fqdn
 }
-output "win_srv01_dns" {
-  value = "${aws_route53_record.dns_srv01.name}.${data.aws_route53_zone.primary.name}"
-}
-output "win_srv02_id" {
-  value = aws_instance.srv02.id
-}
-output "win_srv02_dns" {
-  value = "${aws_route53_record.dns_srv02.name}.${data.aws_route53_zone.primary.name}"
+output "aws_route53_record_public_dns1" {
+  value = aws_route53_record.dns_srv[1].fqdn
 }

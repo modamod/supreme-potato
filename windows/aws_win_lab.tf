@@ -131,10 +131,13 @@ resource "aws_key_pair" "tf_key_pair" {
 resource "aws_instance" "srv" {
   count = var.instance_count
   ami                    = data.aws_ami.win-server12.id
-  subnet_id              = aws_subnet.public_subnet[count.index].id
+  subnet_id              = aws_subnet.public_subnet[count.index % var.subnet_count].id
   instance_type          = "t3.medium"
   key_name               = var.tf_key_name
   vpc_security_group_ids = [aws_security_group.public_sg.id, aws_security_group.private_sg.id]
+  tags = {
+    Name = "srv${count.index}"
+  }
 }
 resource "aws_route53_record" "dns_srv" {
   count   = var.instance_count
@@ -151,9 +154,9 @@ resource "aws_route53_record" "dns_srv" {
 
 /* --------------------------------- Output --------------------------------- */
 
-output "aws_route53_record_public_dns0" {
-  value = aws_route53_record.dns_srv[0].fqdn
+output "aws_route53_record_public_dns" {
+  value = aws_route53_record.dns_srv[*].fqdn
 }
-output "aws_route53_record_public_dns1" {
-  value = aws_route53_record.dns_srv[1].fqdn
+output "aws_instance_id" {
+  value = aws_instance.srv[*].id
 }

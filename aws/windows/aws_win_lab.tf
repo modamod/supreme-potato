@@ -1,6 +1,5 @@
 /* -------------------------------- Variables ------------------------------- */
 
-variable "aws_profile" {}
 variable "tf_key_name" {}
 variable "tf_public_key_path" {}
 variable "tf_private_key_path" {}
@@ -9,6 +8,9 @@ variable "my_ip" {}
 variable "instance_count" {}
 variable "subnet_count" {}
 variable "hostedzone" {}
+variable "aws_profile" {
+  default = "acg"
+}
 variable "aws_region" {
   default = "us-east-1"
 }
@@ -31,7 +33,7 @@ data "aws_ami" "win-server12" {
   owners      = ["amazon"]
   filter {
     name   = "name"
-    values = ["Windows_Server-2012-R2_*"]
+    values = ["Windows_Server-2012-R2*-64Bit-Base-*"]
   }
 
   filter {
@@ -43,6 +45,23 @@ data "aws_ami" "win-server12" {
     name   = "virtualization-type"
     values = ["hvm"]
   }
+}
+
+// data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "instance-assume-role-policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy" "admin_policy" {
+  arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 /* -------------------------------- Resources ------------------------------- */
@@ -61,7 +80,7 @@ resource "aws_internet_gateway" "igw" {
 }
 
 resource "aws_subnet" "public_subnet" {
-  count = var.subnet_count
+  count                   = var.subnet_count
   cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
   vpc_id                  = aws_vpc.vpc.id
   map_public_ip_on_launch = "true"
@@ -80,7 +99,7 @@ resource "aws_route_table" "rtb" {
 }
 
 resource "aws_route_table_association" "rta-public_subnet" {
-  count = var.subnet_count
+  count          = var.subnet_count
   subnet_id      = aws_subnet.public_subnet[count.index].id
   route_table_id = aws_route_table.rtb.id
 }
@@ -128,24 +147,43 @@ resource "aws_key_pair" "tf_key_pair" {
   public_key = file(var.tf_public_key_path)
 }
 
+
+resource "aws_iam_role" "admin_instance" {
+  name = "admin_instance"
+  path = "/"
+  force_detach_policies = true
+  assume_role_policy = data.aws_iam_policy_document.instance-assume-role-policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "admin_policy_attach" {
+  role       = aws_iam_role.admin_instance.name
+  policy_arn = data.aws_iam_policy.admin_policy.arn
+}
+
+resource "aws_iam_instance_profile" "admin_instance" {
+  name = "admin_instance"
+  role = aws_iam_role.admin_instance.name
+}
+
 resource "aws_instance" "srv" {
-  count = var.instance_count
+  count                  = var.instance_count
   ami                    = data.aws_ami.win-server12.id
   subnet_id              = aws_subnet.public_subnet[count.index % var.subnet_count].id
   instance_type          = "t3.medium"
   key_name               = var.tf_key_name
   vpc_security_group_ids = [aws_security_group.public_sg.id, aws_security_group.private_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.admin_instance.id
   tags = {
     Name = "srv${count.index}"
   }
 }
 resource "aws_route53_record" "dns_srv" {
-  count   = var.instance_count
-  zone_id = data.aws_route53_zone.primary.zone_id
-  name    = "srv${count.index}"
-  type    = "A"
-  ttl     = "30"
-  records = [aws_instance.srv[count.index].public_ip]
+  count           = var.instance_count
+  zone_id         = data.aws_route53_zone.primary.zone_id
+  name            = "srv${count.index}"
+  type            = "A"
+  ttl             = "30"
+  records         = [aws_instance.srv[count.index].public_ip]
   allow_overwrite = true
   depends_on = [
     aws_instance.srv

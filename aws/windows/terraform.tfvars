@@ -4,5 +4,5 @@ tf_private_key_path = "../.certs/keypair.pem"
 vpc_cidr            = "10.1.0.0/16"
 subnet_count        = 2
 instance_count      = 3
-my_ip               = ***REMOVED***
-hostedzone          = ***REMOVED***
+my_ip               = ""
+hostedzone          = ""
